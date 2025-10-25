@@ -34,8 +34,21 @@ const ApiCalendarEvent = z.object({
   end: z.string(),   // ISO string
   allDay: z.boolean().optional(),
   location: z.string().optional(),
+  calendarId: z.string().optional(), // Calendar ID where this event belongs
 });
 type ApiCalendarEvent = z.infer<typeof ApiCalendarEvent>;
+
+// Calendar metadata schema
+const ApiCalendar = z.object({
+  id: z.string(),
+  summary: z.string(),
+  description: z.string().optional(),
+  primary: z.boolean().optional(),
+  accessRole: z.string().optional(),
+  backgroundColor: z.string().optional(),
+  foregroundColor: z.string().optional(),
+});
+type ApiCalendar = z.infer<typeof ApiCalendar>;
 
 export const appRouter = t.router({
   // Auth procedures
@@ -51,10 +64,38 @@ export const appRouter = t.router({
 
   // Calendar procedures
   calendar: t.router({
+    listCalendars: protectedProcedure
+      .output(z.array(ApiCalendar))
+      .query(async ({ ctx }) => {
+        console.log('📅 listCalendars called for user:', ctx.user.id);
+        
+        try {
+          const calendars = await calendarService.listCalendars(ctx.user.id);
+          
+          // Map to API shape
+          const mapped: ApiCalendar[] = calendars.map((cal: any) => ({
+            id: cal.id,
+            summary: cal.summary || 'Untitled Calendar',
+            description: cal.description,
+            primary: cal.primary,
+            accessRole: cal.accessRole,
+            backgroundColor: cal.backgroundColor,
+            foregroundColor: cal.foregroundColor,
+          }));
+          
+          console.log('📅 Returning', mapped.length, 'calendars');
+          return mapped;
+        } catch (error) {
+          console.error('📅 Error listing calendars:', error);
+          throw error;
+        }
+      }),
+
     getEvents: protectedProcedure
       .input(z.object({
         timeMin: z.string().optional(),
         timeMax: z.string().optional(),
+        calendarId: z.union([z.string(), z.array(z.string())]).optional(), // Single or multiple calendar IDs
       }))
       .output(z.array(ApiCalendarEvent))
       .query(async ({ input, ctx }) => {
@@ -66,7 +107,8 @@ export const appRouter = t.router({
           googleEvents = await calendarService.getEvents(
             ctx.user.id,
             input.timeMin,
-            input.timeMax
+            input.timeMax,
+            input.calendarId
           );
           console.log('📅 Retrieved', googleEvents?.length || 0, 'events from Google Calendar');
         } catch (error) {
@@ -104,6 +146,7 @@ export const appRouter = t.router({
               end: endIso,
               allDay: !!ev.start?.date && !!ev.end?.date,
               location: ev.location ? String(ev.location) : undefined,
+              calendarId: ev.calendarId ? String(ev.calendarId) : undefined,
             } satisfies ApiCalendarEvent;
             
             console.log('✅ Mapped event:', mappedEvent);
